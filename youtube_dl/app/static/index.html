@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta name="theme-color" content="#ffffff">
+    <title>TubeSafe · 本地视频下载</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar__inner">
+        <a class="brand" href="/" aria-label="TubeSafe 首页">
+          <span class="brand__mark" aria-hidden="true"><i data-lucide="download"></i></span>
+          <span>TubeSafe</span>
+        </a>
+        <div class="local-status" title="服务仅监听 127.0.0.1">
+          <span class="status-dot" aria-hidden="true"></span>
+          仅本机
+        </div>
+      </div>
+    </header>
+
+    <main class="app-shell">
+      <section class="page-heading" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">下载工作台</p>
+          <h1 id="page-title">保存 YouTube 视频</h1>
+        </div>
+        <p class="page-heading__meta">单任务队列 · 本地合流 · 保守连接</p>
+      </section>
+
+      <form id="parse-form" class="url-form" novalidate>
+        <label class="sr-only" for="video-url">YouTube 视频链接</label>
+        <span class="url-form__icon" aria-hidden="true"><i data-lucide="link-2"></i></span>
+        <input
+          id="video-url"
+          name="url"
+          type="url"
+          inputmode="url"
+          autocomplete="url"
+          spellcheck="false"
+          value="https://www.youtube.com/watch?v=VhnAyq6cEjQ"
+          placeholder="粘贴 YouTube 视频链接"
+          aria-describedby="url-error"
+        >
+        <button id="parse-button" class="button button--primary" type="submit">
+          <i data-lucide="search" aria-hidden="true"></i>
+          <span>解析视频</span>
+        </button>
+      </form>
+
+      <div id="parse-error" class="parse-error" role="alert" hidden>
+        <div class="parse-error__message">
+          <i data-lucide="circle-alert" aria-hidden="true"></i>
+          <p id="url-error"></p>
+        </div>
+        <button id="configure-cookies" class="button button--error-action" type="button" hidden>
+          <i data-lucide="settings-2" aria-hidden="true"></i>
+          <span>配置 Cookie</span>
+        </button>
+      </div>
+
+      <div class="workspace">
+        <div class="workspace__main">
+          <section class="section" aria-labelledby="result-title">
+            <div class="section__heading">
+              <div>
+                <p class="section__kicker">01</p>
+                <h2 id="result-title">视频与格式</h2>
+              </div>
+              <span id="format-count" class="section__meta"></span>
+            </div>
+
+            <div id="parse-empty" class="empty-state">
+              <span class="empty-state__icon" aria-hidden="true"><i data-lucide="scan-line"></i></span>
+              <h3>等待解析</h3>
+              <p>视频信息与可用格式将在这里出现。</p>
+            </div>
+
+            <div id="parse-loading" class="result-skeleton" hidden aria-label="正在解析视频">
+              <div class="skeleton skeleton--media"></div>
+              <div class="result-skeleton__body">
+                <div class="skeleton skeleton--line-lg"></div>
+                <div class="skeleton skeleton--line-sm"></div>
+                <div class="skeleton skeleton--row"></div>
+                <div class="skeleton skeleton--row"></div>
+                <div class="skeleton skeleton--row"></div>
+              </div>
+            </div>
+
+            <div id="video-result" class="video-result" hidden>
+              <div class="video-summary">
+                <div class="thumbnail-wrap">
+                  <img id="video-thumbnail" src="" alt="" width="320" height="180">
+                  <span id="video-duration" class="duration"></span>
+                </div>
+                <div class="video-summary__text">
+                  <p id="video-channel" class="video-channel"></p>
+                  <h3 id="video-title"></h3>
+                  <p class="privacy-note"><i data-lucide="shield-check" aria-hidden="true"></i>媒体地址仅在本机下载进程中使用</p>
+                </div>
+              </div>
+
+              <fieldset class="format-picker">
+                <legend>选择输出格式</legend>
+                <div id="format-list" class="format-list"></div>
+              </fieldset>
+
+              <div class="result-action">
+                <p id="selected-format-note" class="selected-note"></p>
+                <button id="queue-button" class="button button--primary" type="button">
+                  <i data-lucide="list-plus" aria-hidden="true"></i>
+                  <span>加入下载队列</span>
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section class="section queue-section" aria-labelledby="queue-title">
+            <div class="section__heading">
+              <div>
+                <p class="section__kicker">02</p>
+                <h2 id="queue-title">下载队列</h2>
+              </div>
+              <span id="queue-count" class="section__meta">0 个任务</span>
+            </div>
+            <div id="queue-empty" class="queue-empty">
+              <i data-lucide="inbox" aria-hidden="true"></i>
+              <span>队列为空</span>
+            </div>
+            <div id="task-list" class="task-list" aria-live="polite"></div>
+          </section>
+        </div>
+
+        <aside class="workspace__aside" aria-label="下载安全配置">
+          <section class="side-section" aria-labelledby="risk-title">
+            <div class="side-section__heading">
+              <div>
+                <p class="section__kicker">风险配置</p>
+                <h2 id="risk-title">保守模式</h2>
+              </div>
+              <span class="risk-badge"><i data-lucide="shield" aria-hidden="true"></i>启用</span>
+            </div>
+
+            <dl class="risk-facts">
+              <div>
+                <dt>并行任务</dt>
+                <dd>1</dd>
+              </div>
+              <div>
+                <dt>媒体连接</dt>
+                <dd id="connection-summary">4</dd>
+              </div>
+              <div>
+                <dt>请求间隔</dt>
+                <dd id="sleep-summary">3–7 秒</dd>
+              </div>
+            </dl>
+
+            <form id="settings-form" class="settings-form">
+              <div class="field-group">
+                <label for="connections">媒体连接数</label>
+                <div class="stepper">
+                  <button type="button" data-step="-1" aria-label="减少连接数" title="减少连接数"><i data-lucide="minus"></i></button>
+                  <input id="connections" name="connections" type="number" min="1" max="4" value="4" readonly>
+                  <button type="button" data-step="1" aria-label="增加连接数" title="增加连接数"><i data-lucide="plus"></i></button>
+                </div>
+              </div>
+
+              <div class="field-row">
+                <div class="field-group">
+                  <label for="sleep-min">最短等待</label>
+                  <div class="input-suffix">
+                    <input id="sleep-min" name="sleep_min" type="number" min="0" max="30" value="3">
+                    <span>秒</span>
+                  </div>
+                </div>
+                <div class="field-group">
+                  <label for="sleep-max">最长等待</label>
+                  <div class="input-suffix">
+                    <input id="sleep-max" name="sleep_max" type="number" min="0" max="60" value="7">
+                    <span>秒</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="field-group">
+                <label for="download-dir">保存目录</label>
+                <input id="download-dir" name="download_dir" type="text" autocomplete="off">
+              </div>
+
+              <div id="cookie-source-group" class="field-group">
+                <div class="label-row">
+                  <label for="cookie-source">Cookie 来源</label>
+                  <span id="cookie-state" class="mini-state">未配置</span>
+                </div>
+                <select id="cookie-source" name="cookie_source">
+                  <option value="">不使用 Cookie</option>
+                  <option value="chrome">Chrome</option>
+                  <option value="safari">Safari</option>
+                  <option value="firefox">Firefox</option>
+                  <option value="edge">Microsoft Edge</option>
+                  <option value="brave">Brave</option>
+                  <option value="chromium">Chromium</option>
+                  <option value="upload">加载 Cookie 文件</option>
+                  <option value="path">已有 Cookie 路径</option>
+                </select>
+                <p class="field-hint"><i data-lucide="lock-keyhole" aria-hidden="true"></i>仅由 yt-dlp 在本机读取</p>
+                <button id="clear-cookie" class="text-action text-action--danger" type="button" hidden>清除 Cookie 配置</button>
+              </div>
+
+              <div id="cookie-upload-group" class="field-group" hidden>
+                <label for="cookie-file">选择 Netscape Cookie 文件</label>
+                <div class="file-loader">
+                  <input id="cookie-file" type="file" accept=".txt,text/plain">
+                  <button id="upload-cookie" class="button button--secondary" type="button">
+                    <i data-lucide="upload" aria-hidden="true"></i>
+                    <span>加载文件</span>
+                  </button>
+                </div>
+                <p id="cookie-file-status" class="field-hint">最大 2 MB</p>
+              </div>
+
+              <div id="cookie-path-group" class="field-group" hidden>
+                <label for="cookies-path">Cookie 文件路径</label>
+                <input id="cookies-path" name="cookies_path" type="text" autocomplete="off" placeholder="/path/to/cookies.txt">
+              </div>
+
+              <div class="field-group">
+                <div class="label-row">
+                  <label for="proxy-url">代理地址</label>
+                  <span id="proxy-state" class="mini-state">未配置</span>
+                </div>
+                <input id="proxy-url" name="proxy_url" type="password" autocomplete="off" placeholder="socks5://127.0.0.1:1080">
+                <label id="clear-proxy-wrap" class="check-row" hidden>
+                  <input id="clear-proxy" type="checkbox">
+                  <span>清除已保存的代理</span>
+                </label>
+              </div>
+
+              <button id="save-settings" class="button button--secondary button--full" type="submit">
+                <i data-lucide="save" aria-hidden="true"></i>
+                <span>保存配置</span>
+              </button>
+            </form>
+          </section>
+
+          <section class="side-section dependencies" aria-labelledby="dependency-title">
+            <div class="side-section__heading side-section__heading--compact">
+              <h2 id="dependency-title">本机依赖</h2>
+              <button id="refresh-health" class="icon-button" type="button" aria-label="刷新依赖状态" title="刷新依赖状态">
+                <i data-lucide="refresh-cw"></i>
+              </button>
+            </div>
+            <ul id="dependency-list" class="dependency-list">
+              <li><span class="dependency-dot dependency-dot--pending"></span><span>正在检查</span></li>
+            </ul>
+          </section>
+        </aside>
+      </div>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  </body>
+</html>

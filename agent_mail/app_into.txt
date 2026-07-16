@@ -1,0 +1,8 @@
+显示名称
+local-mail-agent
+应用程序(客户端) ID
+b0f6a4c1-b7a9-4346-93d7-1705c410b0a9
+对象 ID
+5e5e1fa3-5b93-4fef-a6ae-f4554414f24d
+目录(租户) ID
+1d82b027-6ed7-4b3b-a433-72f856ec6b5c
