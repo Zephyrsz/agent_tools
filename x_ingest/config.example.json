@@ -1,0 +1,14 @@
+{
+  "database": "~/.local/share/x_ingest/posts.sqlite3",
+  "obsidian": {
+    "vault": "/path/to/Obsidian Vault",
+    "folder": "X Clips"
+  },
+  "users": [
+    {
+      "handle": "AndrewYNg",
+      "relation": "own_post",
+      "enabled": true
+    }
+  ]
+}

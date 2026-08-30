@@ -1,11 +1,16 @@
 async (options = {}) => {
   const config = {
-    limit: Number(options.limit || 3),
-    maxScrolls: Number(options.maxScrolls || 8),
+    handle: String(options.handle || location.pathname.split("/").filter(Boolean)[0] || "")
+      .replace(/^@/, "")
+      .toLowerCase(),
+    limit: Number(options.limit || 0),
+    maxScrolls: Number(options.maxScrolls || 100),
     waitMs: Number(options.waitMs || 1200),
+    maxIdleScrolls: Number(options.maxIdleScrolls || 8),
+    markComplete: options.markComplete === true,
     skipPinned: options.skipPinned !== false,
-    skipVideos: options.skipVideos !== false,
-    sortByTimestamp: options.sortByTimestamp !== false,
+    skipVideos: options.skipVideos === true,
+    sortOrder: options.sortOrder === "desc" ? "desc" : "asc",
   };
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -74,6 +79,10 @@ async (options = {}) => {
 
         const text = textFromArticle(article);
         if (!text) return null;
+        const author = authorFromArticle(article);
+        if (config.handle && author.handle.replace(/^@/, "").toLowerCase() !== config.handle) {
+          return null;
+        }
         const video = hasVideo(article);
         if (config.skipVideos && video) return null;
 
@@ -81,7 +90,7 @@ async (options = {}) => {
           text,
           url: statusUrlFromArticle(article),
           timestamp: timestampFromArticle(article),
-          author: authorFromArticle(article),
+          author,
           images: imagesFromArticle(article),
           hasVideo: video,
         };
@@ -91,9 +100,11 @@ async (options = {}) => {
 
   const seen = new Set();
   const posts = [];
+  let idleScrolls = 0;
 
   for (let scroll = 0; scroll <= config.maxScrolls; scroll += 1) {
     await sleep(config.waitMs);
+    const before = posts.length;
 
     for (const post of extractVisiblePosts()) {
       const key = post.url || post.text;
@@ -102,21 +113,33 @@ async (options = {}) => {
       posts.push(post);
     }
 
+    idleScrolls = posts.length === before ? idleScrolls + 1 : 0;
+    if (config.limit > 0 && posts.length >= config.limit) break;
+    if (idleScrolls >= config.maxIdleScrolls) break;
+
     window.scrollBy(0, Math.floor(window.innerHeight * 0.85));
   }
 
-  if (config.sortByTimestamp) {
-    posts.sort((left, right) => {
-      const leftTime = Date.parse(left.timestamp || "") || 0;
-      const rightTime = Date.parse(right.timestamp || "") || 0;
-      return rightTime - leftTime;
-    });
-  }
+  posts.sort((left, right) => {
+    const delta = (Date.parse(left.timestamp || "") || 0) - (Date.parse(right.timestamp || "") || 0);
+    return config.sortOrder === "desc" ? -delta : delta;
+  });
+
+  const selected = config.limit > 0 ? posts.slice(0, config.limit) : posts;
+  const pageFailed = /Something went wrong|Try reloading|出错了|重试/i.test(document.body.innerText || "");
+  const stopReason = pageFailed
+    ? "X timeline reported a loading error"
+    : config.markComplete
+      ? ""
+      : "Timeline boundary reached; completeness was not externally verified";
 
   return {
     sourcePage: location.href,
     capturedAt: new Date().toISOString(),
-    count: Math.min(posts.length, config.limit),
-    posts: posts.slice(0, config.limit),
+    handle: config.handle,
+    status: config.markComplete && !pageFailed ? "complete" : "partial",
+    stopReason,
+    count: selected.length,
+    posts: selected,
   };
 }

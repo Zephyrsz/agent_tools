@@ -1,19 +1,13 @@
-#!/usr/bin/env python3
 """
 Analyze raw X/Twitter post Markdown files with an OpenAI-compatible LLM API.
 
 Default output layout follows the current Obsidian organization:
   X Clips/{Author}/raw/{post}.md
-  X Clips/{Author}/anlysis/{post}.analysis.md
-
-Usage:
-  python3 agent_obsidian/analyze_x_raw_posts.py \
-    --author-dir "/Users/rgwei/Documents/Obsidian Vault/X Clips/Andrew Ng"
+  X Clips/{Author}/analysis/{post}.analysis.md
 """
 
 from __future__ import annotations
 
-import argparse
 import json
 import re
 import urllib.error
@@ -123,7 +117,9 @@ def call_llm(
             {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": USER_PROMPT_TEMPLATE.replace("__RAW_MARKDOWN__", raw_markdown),
+                "content": USER_PROMPT_TEMPLATE.replace(
+                    "__RAW_MARKDOWN__", raw_markdown
+                ),
             },
         ],
         "temperature": temperature,
@@ -150,7 +146,9 @@ def call_llm(
     content = response_data["choices"][0]["message"].get("content", "")
     if not content:
         reasoning = response_data["choices"][0]["message"].get("reasoning_content", "")
-        raise RuntimeError(f"LLM response content is empty. reasoning_content={reasoning[:500]}")
+        raise RuntimeError(
+            f"LLM response content is empty. reasoning_content={reasoning[:500]}"
+        )
     return extract_json(content)
 
 
@@ -301,7 +299,9 @@ def render_analysis_markdown(
         ("Tags", analysis.get("tags", [])),
     ]
 
-    lines.extend(["", "## Why It Matters", "", str(analysis.get("why_it_matters", "")).strip()])
+    lines.extend(
+        ["", "## Why It Matters", "", str(analysis.get("why_it_matters", "")).strip()]
+    )
 
     for title, items in sections:
         lines.extend(["", f"## {title}", ""])
@@ -322,62 +322,48 @@ def render_analysis_markdown(
     return "\n".join(lines).rstrip() + "\n"
 
 
-def analyze_author_dir(args: argparse.Namespace) -> list[Path]:
-    author_dir = args.author_dir.expanduser().resolve()
+def analyze_author_dir(
+    author_dir: str | Path,
+    *,
+    base_url: str = "http://thor:8000/",
+    model: str = "qwen35b",
+    analysis_dir_name: str = "analysis",
+    limit: int | None = None,
+    newest_first: bool = False,
+    overwrite: bool = False,
+    temperature: float = 0.2,
+    max_tokens: int = 1600,
+) -> list[Path]:
+    author_dir = Path(author_dir).expanduser().resolve()
     raw_dir = author_dir / "raw"
     if not raw_dir.is_dir():
         raise SystemExit(f"Raw directory does not exist: {raw_dir}")
 
-    analysis_dir = author_dir / args.analysis_dir_name
+    analysis_dir = author_dir / analysis_dir_name
     analysis_dir.mkdir(parents=True, exist_ok=True)
 
-    raw_files = sorted(raw_dir.glob("*.md"), reverse=args.newest_first)
-    if args.limit:
-        raw_files = raw_files[: args.limit]
+    raw_files = sorted(raw_dir.glob("*.md"), reverse=newest_first)
+    if limit:
+        raw_files = raw_files[:limit]
 
     written: list[Path] = []
     for raw_path in raw_files:
         analysis_path = analysis_dir / f"{raw_path.stem}.analysis.md"
-        if analysis_path.exists() and not args.overwrite:
+        if analysis_path.exists() and not overwrite:
             continue
 
         raw_markdown = raw_path.read_text(encoding="utf-8")
         analysis = call_llm(
-            args.base_url,
-            args.model,
+            base_url,
+            model,
             raw_markdown,
-            args.temperature,
-            args.max_tokens,
+            temperature,
+            max_tokens,
         )
         analysis = apply_document_quality_adjustments(analysis, raw_markdown)
         analysis_path.write_text(
-            render_analysis_markdown(analysis, raw_path, analysis_path, args.model),
+            render_analysis_markdown(analysis, raw_path, analysis_path, model),
             encoding="utf-8",
         )
         written.append(analysis_path)
-        print(analysis_path)
-
     return written
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Analyze raw X posts into Obsidian markdown.")
-    parser.add_argument("--author-dir", required=True, type=Path, help="Author directory containing raw/.")
-    parser.add_argument("--base-url", default="http://thor:8000/", help="OpenAI-compatible API base URL.")
-    parser.add_argument("--model", default="qwen35b", help="Model name.")
-    parser.add_argument("--analysis-dir-name", default="anlysis", help="Analysis directory name.")
-    parser.add_argument("--limit", type=int, help="Analyze at most this many raw files.")
-    parser.add_argument("--newest-first", action="store_true", help="Analyze newer filenames first.")
-    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing analysis files.")
-    parser.add_argument("--temperature", type=float, default=0.2)
-    parser.add_argument("--max-tokens", type=int, default=1600)
-    return parser.parse_args()
-
-
-def main() -> int:
-    analyze_author_dir(parse_args())
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

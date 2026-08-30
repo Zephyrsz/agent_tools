@@ -45,7 +45,7 @@ async (options = {}) => {
   function stripDetailChrome(articleText) {
     let lines = articleText.split("\n").map((line) => line.trim()).filter(Boolean);
 
-    while (lines.length && (/^Andrew Ng$/.test(lines[0]) || /^@\w+/.test(lines[0]))) {
+    while (lines.length && (lines[0] === authorFromArticle(findMainArticle()).displayName || /^@\w+/.test(lines[0]))) {
       lines.shift();
     }
 
@@ -68,6 +68,16 @@ async (options = {}) => {
     const tweetText = normalize(textNode ? textNode.innerText : "");
     if (tweetText) return tweetText;
     return stripDetailChrome(normalize(article.innerText));
+  }
+
+  function authorFromArticle(article) {
+    const userName = article?.querySelector('[data-testid="User-Name"]');
+    const text = normalize(userName ? userName.innerText : "");
+    const handleMatch = text.match(/@\w+/);
+    return {
+      displayName: text.split("\n")[0] || handleFromUrl.replace(/^@/, ""),
+      handle: handleMatch ? handleMatch[0] : handleFromUrl,
+    };
   }
 
   const article = findMainArticle();
@@ -97,10 +107,7 @@ async (options = {}) => {
     skipped: false,
     url: location.href,
     timestamp: article.querySelector("time")?.getAttribute("datetime") || "",
-    author: {
-      displayName: "Andrew Ng",
-      handle: handleFromUrl || "@AndrewYNg",
-    },
+    author: authorFromArticle(article),
     text: extractText(article),
     images: extractImages(article),
     hasVideo: video,
