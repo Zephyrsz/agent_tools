@@ -28,7 +28,7 @@ Result: passed.
 
 ## Commit
 
-`e368d24 feat(x-ingest): add transactional MySQL repository`
+`3a748e5 feat(x-ingest): add transactional MySQL repository`
 
 ## Files
 
