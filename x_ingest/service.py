@@ -6,11 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from .importers import ExtractedBatch, load_extracted_batch
-from .store import SQLitePostStore
+from .repository import PostRepository
 
 
 def ingest_batch(
-    store: SQLitePostStore,
+    store: PostRepository,
     batch: ExtractedBatch,
     *,
     mode: str = "incremental",
@@ -37,7 +37,7 @@ def ingest_batch(
 
 
 def ingest_json(
-    store: SQLitePostStore,
+    store: PostRepository,
     path: str | Path,
     *,
     handle: str = "",

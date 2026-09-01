@@ -42,6 +42,30 @@ async (options = {}) => {
       });
   }
 
+  function isReply(article) {
+    if (!article) return false;
+    const text = normalize(article.innerText || "");
+    return /replying to\s+@|回复\s*@/i.test(text)
+      || Boolean(article.querySelector('[data-testid="replyingTo"]'));
+  }
+
+  function isRepost(article) {
+    if (!article) return false;
+    const context = article.querySelector('[data-testid="socialContext"]');
+    const text = normalize(context ? context.innerText : "");
+    return /reposted|转发|retweeted/i.test(text);
+  }
+
+  function isQuote(article) {
+    if (!article) return false;
+    if (article.querySelector('[data-testid="quoteTweet"], [data-testid="quotedTweet"]')) {
+      return true;
+    }
+    // A quoted post is rendered as a nested article. The main detail article
+    // itself is not nested under another article in the normal layout.
+    return article.querySelectorAll("article").length > 0;
+  }
+
   function stripDetailChrome(articleText) {
     let lines = articleText.split("\n").map((line) => line.trim()).filter(Boolean);
 
@@ -111,6 +135,9 @@ async (options = {}) => {
     text: extractText(article),
     images: extractImages(article),
     hasVideo: video,
+    isReply: isReply(article),
+    isQuote: isQuote(article),
+    isRepost: isRepost(article),
     statusId,
   };
 }

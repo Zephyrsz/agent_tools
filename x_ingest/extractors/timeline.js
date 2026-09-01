@@ -10,6 +10,8 @@ async (options = {}) => {
     markComplete: options.markComplete === true,
     skipPinned: options.skipPinned !== false,
     skipVideos: options.skipVideos === true,
+    stopAtTimestamp: String(options.stopAtTimestamp || ""),
+    stopAtId: String(options.stopAtId || ""),
     sortOrder: options.sortOrder === "desc" ? "desc" : "asc",
   };
 
@@ -128,12 +130,21 @@ async (options = {}) => {
   const seen = new Set();
   const posts = [];
   let idleScrolls = 0;
+  let reachedCursor = false;
 
   for (let scroll = 0; scroll <= config.maxScrolls; scroll += 1) {
     await sleep(config.waitMs);
     const before = posts.length;
 
     for (const post of extractVisiblePosts()) {
+      if (config.stopAtTimestamp) {
+        const postEpoch = Date.parse(post.timestamp || "") || 0;
+        const cursorEpoch = Date.parse(config.stopAtTimestamp) || 0;
+        if (postEpoch < cursorEpoch || (postEpoch === cursorEpoch && config.stopAtId && post.url.endsWith(config.stopAtId))) {
+          reachedCursor = true;
+          continue;
+        }
+      }
       const key = post.url || post.text;
       if (!key || seen.has(key)) continue;
       seen.add(key);
@@ -142,7 +153,7 @@ async (options = {}) => {
 
     idleScrolls = posts.length === before ? idleScrolls + 1 : 0;
     if (config.limit > 0 && posts.length >= config.limit) break;
-    if (idleScrolls >= config.maxIdleScrolls) break;
+    if (reachedCursor || idleScrolls >= config.maxIdleScrolls) break;
 
     window.scrollBy(0, Math.floor(window.innerHeight * 0.85));
   }
@@ -156,7 +167,7 @@ async (options = {}) => {
   const pageFailed = /Something went wrong|Try reloading|出错了|重试/i.test(document.body.innerText || "");
   const stopReason = pageFailed
     ? "X timeline reported a loading error"
-    : config.markComplete
+    : (config.markComplete || reachedCursor)
       ? ""
       : "Timeline boundary reached; completeness was not externally verified";
 
@@ -164,7 +175,7 @@ async (options = {}) => {
     sourcePage: location.href,
     capturedAt: new Date().toISOString(),
     handle: config.handle,
-    status: config.markComplete && !pageFailed ? "complete" : "partial",
+    status: (config.markComplete || reachedCursor) && !pageFailed ? "complete" : "partial",
     stopReason,
     count: selected.length,
     posts: selected,

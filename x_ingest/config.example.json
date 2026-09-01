@@ -1,5 +1,23 @@
 {
-  "database": "~/.local/share/x_ingest/posts.sqlite3",
+  "mysql": {
+    "host": "127.0.0.1",
+    "port": 3306,
+    "user": "x_ingest",
+    "database": "x_ingest",
+    "password_env": "X_INGEST_DB_PASSWORD",
+    "charset": "utf8mb4",
+    "connect_timeout": 10
+  },
+  "media_root": "~/.local/share/x_ingest/media",
+  "browser": {
+    "cdp_url": "http://127.0.0.1:9222",
+    "profile_dir": "~/.local/share/x_ingest/chrome-devtools",
+    "mcp_command": ["npx", "--yes", "chrome-devtools-mcp@0.13.0"],
+    "max_scrolls": 10000,
+    "batch_size": 20,
+    "wait_ms": 1200,
+    "max_retries": 3
+  },
   "obsidian": {
     "vault": "/path/to/Obsidian Vault",
     "folder": "X Clips"

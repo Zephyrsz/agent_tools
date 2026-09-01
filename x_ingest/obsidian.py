@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .store import SQLitePostStore
+from .repository import PostRepository
 
 
 def obsidian_config_path() -> Path:
@@ -97,7 +97,7 @@ def render_post(post: dict[str, Any], media: list[dict[str, Any]]) -> str:
 
 
 def export_posts(
-    store: SQLitePostStore,
+    store: PostRepository,
     *,
     vault: str | Path,
     handle: str,

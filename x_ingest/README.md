@@ -1,53 +1,38 @@
 # x_ingest
 
-`x_ingest` archives rendered X/Twitter timeline posts into SQLite, supports
-incremental cursors and queries, and exports stable Markdown files to Obsidian.
-Browser authentication remains in a dedicated Chrome profile; cookies and
-credentials are never stored in this project or in SQLite.
+`x_ingest` archives original X posts through a dedicated Chrome session and
+Chrome DevTools MCP. MySQL is the only production source of truth: post text,
+chronological cursors, candidate decisions, and media state live in MySQL.
+Images are stored under a local `media_root`; Markdown is an optional projection.
 
-## Layout
+## Architecture
 
 ```text
-x_ingest/
-├── models.py             canonical Post and MediaItem models
-├── importers.py          extractor JSON reader
-├── store.py              SQLite schema and repository
-├── service.py            begin/upsert/finish ingestion workflow
-├── obsidian.py           deterministic Markdown export
-├── analysis.py           optional LLM document-quality analysis
-├── config.py             JSON configuration reader
-├── cli.py                unified command line interface
-├── extractors/           JavaScript run inside an authenticated X page
-├── examples/             captured AndrewYNg example data
-└── tests/                standard-library unit tests
+Dedicated Chrome profile (signed in to X)
+        -> Chrome DevTools MCP (stdio JSON-RPC)
+        -> ChromeDevToolsMcpGateway (navigation/evaluation)
+        -> CrawlCoordinator (candidate queue + detail policy)
+        -> MySQLPostRepository (canonical facts and cursors)
+        -> MediaDownloader (local images, retryable state)
 ```
 
-SQLite is the source of truth. Obsidian files are derived output and may be
-regenerated. Keep the active SQLite database outside iCloud/Obsidian because
-WAL mode also creates `-wal` and `-shm` files.
+Only Chrome owns cookies and tokens. Python never reads cookies, authorization
+headers, or browser databases. Do not copy credentials into JSON, captures, or
+MySQL.
 
-## Configuration
+## Installation
 
-Copy `config.example.json` to a private location and update the database and
-vault paths. A user handle is a configuration value, not a hard-coded author.
-
-```json
-{
-  "database": "~/.local/share/x_ingest/posts.sqlite3",
-  "obsidian": {"vault": "/path/to/vault", "folder": "X Clips"},
-  "users": [{"handle": "AndrewYNg", "relation": "own_post", "enabled": true}]
-}
+```bash
+python3 -m pip install -r x_ingest/requirements.txt
+export X_INGEST_DB_PASSWORD='your-password'
 ```
 
-## Workflow
+The MySQL database and user must already exist. The password environment
+variable is selected by `mysql.password_env` in the JSON config.
 
-### Chrome DevTools MCP authentication
+## Chrome profile
 
-Use a dedicated persistent Chrome profile and sign in to X once in that
-profile. Chrome keeps the encrypted session cookies in the profile and adds
-them to X requests automatically, including HttpOnly cookies. The MCP client
-should attach to Chrome; it should not export Cookie or Authorization header
-values into source files, shell history, captured JSON, or SQLite.
+Start a visible Chrome instance reserved for this tool, then sign in to X once:
 
 ```bash
 open -na "Google Chrome" --args \
@@ -55,78 +40,75 @@ open -na "Google Chrome" --args \
   --remote-allow-origins='*' \
   --user-data-dir="$HOME/.local/share/x_ingest/chrome-devtools" \
   --profile-directory=Default \
-  --no-first-run \
-  --no-default-browser-check
+  --no-first-run --no-default-browser-check
 ```
 
-Configure Chrome DevTools MCP to attach to the same browser:
+The default MCP command is `npx --yes chrome-devtools-mcp@0.13.0`; `x_ingest`
+starts it and attaches to `http://127.0.0.1:9222`. `login` only waits for this
+visible browser to become authenticated. It does not implement a Google OAuth
+flow or handle credentials.
+
+## Configuration
+
+Start from [`config.example.json`](./config.example.json). Relative paths are
+resolved relative to the config file. Watched users are edited only in JSON:
+
+```json
+{
+  "mysql": {
+    "host": "127.0.0.1",
+    "port": 3306,
+    "user": "x_ingest",
+    "database": "x_ingest",
+    "password_env": "X_INGEST_DB_PASSWORD"
+  },
+  "media_root": "~/.local/share/x_ingest/media",
+  "browser": {
+    "cdp_url": "http://127.0.0.1:9222",
+    "profile_dir": "~/.local/share/x_ingest/chrome-devtools"
+  },
+  "users": [{"handle": "AndrewYNg", "relation": "own_post", "enabled": true}]
+}
+```
+
+## Commands
 
 ```bash
-npx chrome-devtools-mcp@latest --browserUrl=http://127.0.0.1:9222
+python3 -m x_ingest --config x_ingest/config.json init
+python3 -m x_ingest --config x_ingest/config.json login --timeout 300
+python3 -m x_ingest --config x_ingest/config.json crawl --handle AndrewYNg --mode full
+python3 -m x_ingest --config x_ingest/config.json crawl --handle AndrewYNg
+python3 -m x_ingest --config x_ingest/config.json retry-media
+python3 -m x_ingest --config x_ingest/config.json query --handle AndrewYNg --order asc
+python3 -m x_ingest --config x_ingest/config.json state --handle AndrewYNg
 ```
 
-The X session can expire or be revoked. When that happens, open X in this
-dedicated profile and sign in again. Do not copy cookie values into config.
+Every candidate is opened in its detail page. Only posts authored by the target
+handle that are not replies, quotes, reposts, or videos are saved. A partial run
+stores extracted facts but does not advance `(created_at, post_id)`; retries are
+idempotent by numeric X post ID.
 
-For a historical backfill, search one bounded year at a time with the Live
-tab selected:
-
-```text
-from:AndrewYNg since:2022-01-01 until:2023-01-01 -filter:replies
-```
-
-Run `extractors/timeline.js` in the page through DevTools MCP and save its JSON
-result under a private capture directory. Import only after checking that the
-page loaded posts and did not return HTTP 429. A zero-row result collected
-while X endpoints are rate limited is invalid, not proof that the year is
-empty. On 429, navigate the X tab to `about:blank`, wait 10-20 minutes, and
-retry one window. Avoid concurrent X tabs and rapid reloads.
-
-Captured batches remain partial until the intended time boundary and X
-Articles have been independently reconciled. Overlap at yearly boundaries is
-expected; SQLite deduplicates by post ID. If scrolling stops before the
-`since` boundary, or a high-volume result appears capped, split that period
-into quarterly or monthly windows. An idle scrollbar is not proof that the
-query window is complete.
-
-Initialize and import a captured batch:
+SQLite remains available only for offline fixtures and migration tooling:
 
 ```bash
-python3 -m x_ingest --config x_ingest/config.example.json init
 python3 -m x_ingest --config x_ingest/config.example.json import \
-  x_ingest/examples/andrewyng_recent3.json --handle AndrewYNg --mode full
+  x_ingest/examples/andrewyng_recent3.json --handle AndrewYNg --storage sqlite
 ```
 
-Query and inspect the successful incremental cursor:
+Optional Markdown export reads the selected repository and writes derived files:
 
 ```bash
-python3 -m x_ingest --config x_ingest/config.example.json query \
-  --handle AndrewYNg --after 2026-01-01T00:00:00Z \
-  --after-id 2000000000000000000 --order asc
-python3 -m x_ingest --config x_ingest/config.example.json state --handle AndrewYNg
+python3 -m x_ingest --config x_ingest/config.json export \
+  --handle AndrewYNg --vault "/path/to/vault"
 ```
 
-Export to Obsidian:
+## Testing
 
 ```bash
-python3 -m x_ingest --config x_ingest/config.example.json export --handle AndrewYNg
+python3 -m unittest discover -s x_ingest/tests -v
+python3 -m compileall -q x_ingest
 ```
 
-Analyze exported notes:
-
-```bash
-python3 -m x_ingest analyze --author-dir "/path/to/vault/X Clips/Andrew Ng"
-```
-
-## Incremental contract
-
-The stable cursor is `(created_at, post_id)`. A crawler should persist batches
-frequently and mark the run successful only after reaching its intended time
-boundary. Partial runs still store discovered posts, but do not advance
-`crawl_state`. `post_id` is the database primary key, so retries are safe.
-
-The scripts in `extractors/` are page-context functions. `timeline.js` accepts
-`handle`, `limit`, `maxScrolls`, `maxIdleScrolls`, `waitMs`, `skipPinned`,
-`skipVideos`, and `sortOrder`. They intentionally do not read browser cookies.
-Timeline output defaults to `partial`; set `markComplete` only after an
-orchestrator has verified the intended newest/oldest boundary.
+The unit suite uses a DB-API fake for MySQL. Run live smoke tests only against a
+disposable database and an explicitly started Chrome session. Never commit the
+Chrome profile, media directory, private config, or database files.

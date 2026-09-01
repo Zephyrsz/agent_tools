@@ -4,3 +4,8 @@
 *.sqlite3-wal
 __pycache__/
 captures/
+browser-profile/
+media/
+config.json
+task_config/
+*.db

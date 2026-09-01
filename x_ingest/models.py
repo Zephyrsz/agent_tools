@@ -145,3 +145,48 @@ class Post:
 
     def to_mapping(self) -> dict[str, Any]:
         return json.loads(self.raw_json)
+
+
+@dataclass(frozen=True)
+class PostDetail:
+    """Normalized detail facts and the archive policy decision."""
+
+    post: Post
+    is_reply: bool = False
+    is_quote: bool = False
+    is_repost: bool = False
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any], fallback_handle: str = "") -> "PostDetail":
+        if not isinstance(value, Mapping):
+            raise TypeError("post detail must be a mapping")
+        post = Post.from_mapping(value, fallback_handle)
+        kind = post.post_kind.lower()
+        return cls(
+            post=post,
+            is_reply=bool(value.get("isReply", value.get("is_reply", False)))
+            or kind in {"reply", "replies"}
+            or bool(value.get("replyTo")),
+            is_quote=bool(value.get("isQuote", value.get("is_quote", False)))
+            or kind in {"quote", "quoted"}
+            or bool(value.get("quotedPost")),
+            is_repost=bool(value.get("isRepost", value.get("is_repost", False)))
+            or kind in {"repost", "retweet", "reposted"}
+            or bool(value.get("isRetweet")),
+        )
+
+    def decision_for(self, handle: str) -> str:
+        target = normalize_handle(handle)
+        if not target or self.post.author_handle != target:
+            return "other"
+        if self.post.has_video:
+            return "video"
+        if self.is_reply:
+            return "reply"
+        if self.is_quote:
+            return "quote"
+        if self.is_repost:
+            return "repost"
+        if not self.post.text and not self.post.media:
+            return "other"
+        return "saved"
