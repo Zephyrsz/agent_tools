@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from x_ingest.media import MediaDownloader
+from x_ingest.media_downloader import MediaDownloader
 
 
 class FakeRepository:

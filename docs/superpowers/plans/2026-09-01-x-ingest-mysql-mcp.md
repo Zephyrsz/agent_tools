@@ -9,7 +9,7 @@
 - `x_ingest/mcp_client.py`: stdio MCP JSON-RPC client.
 - `x_ingest/browser_gateway.py`: Chrome DevTools MCP adapter and extractor calls.
 - `x_ingest/crawler.py`: resumable candidate/detail workflow migrated from the old branch without Browser Use.
-- `x_ingest/media.py`: local image downloader and retry state.
+- `x_ingest/media_downloader.py`: local image downloader and retry state.
 - `x_ingest/cli.py`: MySQL lifecycle and MCP-backed commands.
 - `x_ingest/extractors/*.js`: candidate and detail classification functions.
 - `x_ingest/requirements.txt`: PyMySQL runtime dependency only.

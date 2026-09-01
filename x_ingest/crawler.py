@@ -63,7 +63,10 @@ class CrawlCoordinator:
             options = dict(discovery_options or {})
             if limit is not None:
                 options["limit"] = max(1, int(limit))
-            options.setdefault("markComplete", mode != "backfill")
+            # A full/backfill scroll has no externally verified earliest boundary.
+            # Incremental runs become complete only when timeline.js reaches the
+            # previously persisted cursor.
+            options["markComplete"] = False
             if mode == "incremental" and "stopAtTimestamp" not in options:
                 state = getattr(self.repository, "get_state", lambda _handle: None)(target)
                 if state and state.get("newest_seen_at"):

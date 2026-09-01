@@ -36,6 +36,7 @@ class FakeRepository:
 
 class FakeGateway:
     def __init__(self):
+        self.discovery_options = []
         self.details = {
             "https://x.com/example/status/1": {
                 "postId": "1", "url": "https://x.com/example/status/1",
@@ -59,6 +60,7 @@ class FakeGateway:
         return True
 
     async def discover_candidates(self, handle, **kwargs):
+        self.discovery_options.append(kwargs)
         return {"status": "complete", "candidates": [{"url": url} for url in self.details]}
 
     async def extract_detail(self, url):
@@ -90,6 +92,16 @@ class CrawlCoordinatorTests(unittest.TestCase):
             result = await coordinator.crawl("example")
             self.assertFalse(result["successful"])
             self.assertFalse(repository.finished[0][1]["successful"])
+
+        asyncio.run(scenario())
+
+    def test_initial_full_crawl_does_not_claim_unverified_completeness(self):
+        async def scenario():
+            repository = FakeRepository()
+            gateway = FakeGateway()
+            coordinator = CrawlCoordinator(repository, gateway)
+            await coordinator.crawl("example", mode="full")
+            self.assertEqual(gateway.discovery_options[0]["markComplete"], False)
 
         asyncio.run(scenario())
 

@@ -12,7 +12,7 @@ from .analysis import analyze_author_dir
 from .browser_gateway import ChromeDevToolsMcpGateway
 from .config import AppConfig, load_config
 from .crawler import CrawlCoordinator
-from .media import MediaDownloader
+from .media_downloader import MediaDownloader
 from .mysql_store import MySQLPostRepository
 from .obsidian import export_posts
 from .service import ingest_json

@@ -1,4 +1,4 @@
-"""Export canonical posts from SQLite into stable Obsidian Markdown files."""
+"""Export canonical repository posts into stable Obsidian Markdown files."""
 
 from __future__ import annotations
 
