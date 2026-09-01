@@ -40,11 +40,31 @@ async (options = {}) => {
 
   function textFromArticle(article) {
     const textNodes = [...article.querySelectorAll('[data-testid="tweetText"]')];
-    if (!textNodes.length) return "";
+    if (textNodes.length) {
+      // The first tweetText is the timeline item itself. Later tweetText nodes can
+      // belong to quoted posts embedded inside the same article.
+      return normalize(textNodes[0].innerText);
+    }
 
-    // The first tweetText is the timeline item itself. Later tweetText nodes can
-    // belong to quoted posts embedded inside the same article.
-    return normalize(textNodes[0].innerText);
+    // X Articles and link-only posts may not render a tweetText node. Preserve
+    // the visible card title/summary instead of dropping the status entirely.
+    const articlePreview = articlePreviewFromArticle(article);
+    if (articlePreview) return articlePreview;
+    const card = article.querySelector('[data-testid="card.wrapper"]');
+    return normalize(card ? card.innerText : "");
+  }
+
+  function articlePreviewFromArticle(article) {
+    const cover = article.querySelector('[data-testid="article-cover-image"]');
+    if (!cover) return "";
+    return normalize(cover.parentElement ? cover.parentElement.innerText : "")
+      .replace(/^Article\s*/i, "")
+      .trim();
+  }
+
+  function articleUrlFromArticle(article) {
+    const link = article.querySelector('a[href*="/i/article/"], a[href*="/article/"]');
+    return link ? new URL(link.getAttribute("href"), location.origin).toString() : "";
   }
 
   function hasVideo(article) {
@@ -78,21 +98,28 @@ async (options = {}) => {
         }
 
         const text = textFromArticle(article);
-        if (!text) return null;
+        const url = statusUrlFromArticle(article);
+        const timestamp = timestampFromArticle(article);
+        if (!url || !timestamp) return null;
         const author = authorFromArticle(article);
         if (config.handle && author.handle.replace(/^@/, "").toLowerCase() !== config.handle) {
           return null;
         }
         const video = hasVideo(article);
         if (config.skipVideos && video) return null;
+        const articlePreview = articlePreviewFromArticle(article);
+        const articleUrl = articleUrlFromArticle(article);
 
         return {
           text,
-          url: statusUrlFromArticle(article),
-          timestamp: timestampFromArticle(article),
+          url,
+          timestamp,
           author,
           images: imagesFromArticle(article),
           hasVideo: video,
+          postKind: articlePreview || articleUrl ? "article" : "post",
+          articlePreview,
+          articleUrl,
         };
       })
       .filter(Boolean);

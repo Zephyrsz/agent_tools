@@ -41,6 +41,54 @@ vault paths. A user handle is a configuration value, not a hard-coded author.
 
 ## Workflow
 
+### Chrome DevTools MCP authentication
+
+Use a dedicated persistent Chrome profile and sign in to X once in that
+profile. Chrome keeps the encrypted session cookies in the profile and adds
+them to X requests automatically, including HttpOnly cookies. The MCP client
+should attach to Chrome; it should not export Cookie or Authorization header
+values into source files, shell history, captured JSON, or SQLite.
+
+```bash
+open -na "Google Chrome" --args \
+  --remote-debugging-port=9222 \
+  --remote-allow-origins='*' \
+  --user-data-dir="$HOME/.local/share/x_ingest/chrome-devtools" \
+  --profile-directory=Default \
+  --no-first-run \
+  --no-default-browser-check
+```
+
+Configure Chrome DevTools MCP to attach to the same browser:
+
+```bash
+npx chrome-devtools-mcp@latest --browserUrl=http://127.0.0.1:9222
+```
+
+The X session can expire or be revoked. When that happens, open X in this
+dedicated profile and sign in again. Do not copy cookie values into config.
+
+For a historical backfill, search one bounded year at a time with the Live
+tab selected:
+
+```text
+from:AndrewYNg since:2022-01-01 until:2023-01-01 -filter:replies
+```
+
+Run `extractors/timeline.js` in the page through DevTools MCP and save its JSON
+result under a private capture directory. Import only after checking that the
+page loaded posts and did not return HTTP 429. A zero-row result collected
+while X endpoints are rate limited is invalid, not proof that the year is
+empty. On 429, navigate the X tab to `about:blank`, wait 10-20 minutes, and
+retry one window. Avoid concurrent X tabs and rapid reloads.
+
+Captured batches remain partial until the intended time boundary and X
+Articles have been independently reconciled. Overlap at yearly boundaries is
+expected; SQLite deduplicates by post ID. If scrolling stops before the
+`since` boundary, or a high-volume result appears capped, split that period
+into quarterly or monthly windows. An idle scrollbar is not proof that the
+query window is complete.
+
 Initialize and import a captured batch:
 
 ```bash

@@ -52,6 +52,25 @@ class SQLitePostStoreTests(unittest.TestCase):
         self.assertEqual(result["updated"], 1)
         self.assertEqual(self.store.query_posts(handle="Example")[0]["text"], "after")
 
+    def test_article_without_tweet_text_is_stored(self) -> None:
+        article = Post.from_mapping(
+            {
+                "url": "https://x.com/Example/status/456",
+                "timestamp": "2026-08-30T10:00:00.000Z",
+                "text": "",
+                "author": {"displayName": "Example User", "handle": "@Example"},
+                "postKind": "article",
+                "articleUrl": "https://x.com/i/article/456",
+            }
+        )
+
+        result = self.store.upsert_posts([article], handle="Example")
+        stored = self.store.query_posts(handle="Example")[0]
+
+        self.assertEqual(result["inserted"], 1)
+        self.assertEqual(stored["post_kind"], "article")
+        self.assertEqual(stored["text"], "")
+
     def test_partial_batch_does_not_advance_success_cursor(self) -> None:
         batch = ExtractedBatch(
             posts=(sample_post(),),
