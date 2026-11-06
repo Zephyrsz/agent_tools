@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import random
 import re
 import time
 import uuid
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -17,10 +19,33 @@ from .core import Settings, normalize_youtube_url
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 PROGRESS_RE = re.compile(r"PROGRESS:(?P<percent>[\d.]+)%\|(?P<speed>[^|]*)\|(?P<eta>.*)")
+TASK_LOG_DIR = Path(__file__).resolve().parent.parent / "logs" / "tasks"
+logger = logging.getLogger(__name__)
 
 
 class DownloadError(RuntimeError):
     pass
+
+
+def task_log_path(task_id: str) -> Path:
+    if not re.fullmatch(r"[0-9a-f]{12}", task_id):
+        raise DownloadError("无效的任务编号")
+    return TASK_LOG_DIR / f"{task_id}.log"
+
+
+def _redact_output(text: str) -> str:
+    text = ANSI_RE.sub("", text)
+    text = re.sub(r"(?:https?|socks[45]h?)://[^\s]+", "[URL 已隐藏]", text, flags=re.I)
+    return re.sub(r"((?:proxy-)?authorization|(?:set-)?cookie)(\s*:\s*)[^\r\n]*", r"\1\2[已隐藏]", text, flags=re.I)
+
+
+def _task_log(task: Task, message: str) -> None:
+    TASK_LOG_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = task_log_path(task.id)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(fd, "a", encoding="utf-8") as handle:
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        handle.write(f"[{timestamp}] {_redact_output(message)}\n")
 
 
 @dataclass(slots=True)
@@ -43,6 +68,7 @@ class Task:
     def public(self) -> dict[str, Any]:
         data = asdict(self)
         data["ready"] = self.status == "completed" and bool(self.file_path)
+        data["log_available"] = task_log_path(self.id).is_file()
         data.pop("file_path", None)
         data.pop("url", None)
         return data
@@ -53,7 +79,6 @@ def _common_args(settings: Settings) -> list[str]:
         "yt-dlp",
         "--ignore-config",
         "--no-playlist",
-        "--no-warnings",
         "--js-runtimes",
         "node",
         "--remote-components",
@@ -107,7 +132,7 @@ async def _run_json(args: list[str], timeout: int = 90) -> dict[str, Any]:
 
 
 def _friendly_error(detail: str) -> str:
-    clean = ANSI_RE.sub("", detail).removeprefix("ERROR: ").strip()
+    clean = _redact_output(detail).removeprefix("ERROR: ").strip()
     lower = clean.lower()
     if "sign in" in lower or "confirm you’re not a bot" in lower or "not a bot" in lower:
         return "YouTube 要求验证身份，请选择已登录 YouTube 的浏览器作为 Cookie 来源"
@@ -231,6 +256,7 @@ class DownloadManager:
             format_id=format_id[:160],
             format_label=format_label[:40],
         )
+        _task_log(task, f"queued: {task.title}\nformat={task.format_id}")
         self.tasks[task.id] = task
         self.queue.put_nowait(task.id)
         return task
@@ -242,6 +268,7 @@ class DownloadManager:
         task.status = "cancelled"
         task.detail = "已取消"
         task.updated_at = time.time()
+        _task_log(task, "cancelled: 用户取消任务")
         process = self.processes.get(task_id)
         if process and process.returncode is None:
             process.terminate()
@@ -295,11 +322,49 @@ class DownloadManager:
                 self.queue.task_done()
 
     async def _download(self, task: Task, settings: Settings) -> None:
+        _task_log(task, f"starting: cookies={settings.cookies_browser or ('file' if settings.cookies_path else 'none')}; format={task.format_id}")
+        try:
+            for downloader in ("aria2c", "native"):
+                code, detail = await self._download_attempt(task, settings, downloader)
+                if task.status == "cancelled":
+                    _task_log(task, "cancelled")
+                    return
+                if not code:
+                    break
+                # aria2 的 22 可能包裹真正的 HTTP 原因；限流时不额外重试。
+                if (downloader == "aria2c" and "aria2c exited with code 22" in detail
+                        and "429" not in detail and "too many requests" not in detail.lower()):
+                    task.detail = "外部下载器响应异常，切换内置下载器重试"
+                    _task_log(task, "retry: aria2c HTTP response error; switching to native (once)")
+                    continue
+                raise DownloadError(_friendly_error(detail))
+            if not task.file_path or not Path(task.file_path).is_file():
+                raise DownloadError("下载完成但未找到输出文件")
+            task.status = "completed"
+            task.progress = 100
+            task.detail = "文件已就绪"
+            task.updated_at = time.time()
+            _task_log(task, f"completed: {task.file_path}")
+        except asyncio.CancelledError:
+            _task_log(task, "cancelled: 服务停止或任务被中断")
+            raise
+        except Exception as exc:
+            detail = _friendly_error(str(exc))
+            _task_log(task, f"failed: {detail}")
+            logger.error("Task %s failed: %s; log: %s", task.id, detail, task_log_path(task.id))
+            raise
+        finally:
+            self.processes.pop(task.id, None)
+
+    async def _download_attempt(self, task: Task, settings: Settings, downloader: str) -> tuple[int, str]:
         download_dir = Path(settings.download_dir)
         download_dir.mkdir(parents=True, exist_ok=True)
         task.status = "downloading"
         task.detail = "下载媒体流"
         task.updated_at = time.time()
+        task.progress = 0
+        task.speed = task.eta = task.file_path = ""
+        _task_log(task, f"downloader={downloader}")
 
         aria_args = (
             f"aria2c:-x {settings.connections} -s {settings.connections} -k 1M "
@@ -307,6 +372,8 @@ class DownloadManager:
         )
         args = _common_args(settings) + [
             "--newline",
+            "--no-quiet",
+            "--progress",
             "--progress-template",
             "download:PROGRESS:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s",
             "--print",
@@ -314,16 +381,15 @@ class DownloadManager:
             "--concurrent-fragments",
             "1",
             "--external-downloader",
-            "aria2c",
+            downloader,
             "--external-downloader-args",
             aria_args,
             "--merge-output-format",
             "mp4",
-            "--restrict-filenames",
             "--paths",
             str(download_dir),
             "--output",
-            "%(title).180B [%(id)s].%(ext)s",
+            "%(title)s.%(ext)s",
             "--format",
             task.format_id,
             task.url,
@@ -336,13 +402,17 @@ class DownloadManager:
         )
         self.processes[task.id] = process
         assert process.stdout
-        lines: list[str] = []
+        lines: deque[str] = deque(maxlen=40)
+        errors: deque[str] = deque(maxlen=20)
         async for raw_line in process.stdout:
             line = ANSI_RE.sub("", raw_line.decode("utf-8", "replace")).strip()
+            _task_log(task, line)
             if not line:
                 continue
-            lines.append(line)
-            lines = lines[-12:]
+            safe_line = _redact_output(line)
+            lines.append(safe_line)
+            if re.search(r"error|status=[45]\d\d|forbidden|too many requests", safe_line, re.I):
+                errors.append(safe_line)
             match = PROGRESS_RE.search(line.replace(" ", ""))
             if match:
                 task.progress = min(99.0, float(match.group("percent")))
@@ -356,13 +426,5 @@ class DownloadManager:
             elif line.startswith("FILE:"):
                 task.file_path = line[5:]
         code = await process.wait()
-        if task.status == "cancelled":
-            return
-        if code:
-            raise DownloadError(_friendly_error(lines[-1] if lines else "下载进程异常退出"))
-        if not task.file_path or not Path(task.file_path).is_file():
-            raise DownloadError("下载完成但未找到输出文件")
-        task.status = "completed"
-        task.progress = 100
-        task.detail = "文件已就绪"
-        task.updated_at = time.time()
+        _task_log(task, f"downloader={downloader} exit_code={code}")
+        return code, "\n".join(errors or lines) or "下载进程异常退出"

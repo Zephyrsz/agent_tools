@@ -7,3 +7,5 @@ downloads/
 cookies.txt
 *.part
 *.ytdl
+.run/
+logs/

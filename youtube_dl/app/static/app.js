@@ -235,6 +235,7 @@ function renderTasks() {
         <div class="task-item__bottom">
           <p class="task-item__detail">${escapeHtml(detail || "等待状态更新")}</p>
           <div class="task-actions">
+            ${task.log_available ? `<a class="button button--secondary" href="/api/tasks/${task.id}/log"><i data-lucide="file-text"></i>下载日志</a>` : ""}
             ${task.ready ? `<a class="button button--primary" href="/api/files/${task.id}"><i data-lucide="file-down"></i>领取文件</a>` : ""}
             ${active ? `<button class="button button--danger-ghost" type="button" data-action="cancel"><i data-lucide="square"></i>取消</button>` : ""}
             ${!active ? `<button class="icon-button" type="button" data-action="delete" aria-label="删除任务" title="删除任务"><i data-lucide="trash-2"></i></button>` : ""}

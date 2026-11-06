@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .core import MANAGED_COOKIES_PATH, MAX_COOKIE_FILE_BYTES, Settings, dependency_status, store_managed_cookies
-from .downloader import DownloadError, DownloadManager, VideoService
+from .downloader import DownloadError, DownloadManager, VideoService, task_log_path
 
 
 BASE_DIR = Path(__file__).parent
@@ -155,6 +155,17 @@ async def cancel_task(task_id: str) -> dict[str, Any]:
         return (await download_manager.cancel(task_id)).public()
     except DownloadError as exc:
         raise api_error(exc, 404) from exc
+
+
+@app.get("/api/tasks/{task_id}/log")
+async def get_task_log(task_id: str):
+    try:
+        path = task_log_path(task_id)
+    except DownloadError as exc:
+        raise api_error(exc, 404) from exc
+    if not path.is_file():
+        raise api_error(RuntimeError("未找到该任务的日志"), 404)
+    return FileResponse(path, media_type="text/plain", filename=f"tubesafe-{task_id}.log")
 
 
 @app.delete("/api/tasks/{task_id}", status_code=204)
